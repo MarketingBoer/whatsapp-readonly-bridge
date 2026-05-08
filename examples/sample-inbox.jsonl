@@ -1,0 +1,6 @@
+{"ts": "2026-05-08T09:14:23.761+00:00", "from": "31612345678", "type": "text", "text": "Hoi, ik wil graag een afspraak maken voor volgende week", "name": "Jan de Vries", "raw": {}}
+{"ts": "2026-05-08T09:15:01.442+00:00", "from": "31612345678", "type": "image", "text": "[image]", "name": "Jan de Vries", "raw": {}}
+{"ts": "2026-05-08T11:32:17.109+00:00", "from": "31687654321", "type": "text", "text": "Kunnen jullie morgen langskomen? Het gaat om de achttertuin", "name": "Lisa Bakker", "raw": {}}
+{"ts": "2026-05-08T14:05:44.833+00:00", "from": "31698765432", "type": "text", "text": "Bedankt voor de offerte, we gaan ermee akkoord", "name": "Pieter Jansen", "raw": {}}
+{"ts": "2026-05-08T14:06:12.501+00:00", "from": "31698765432", "type": "document", "text": "[document: offerte-getekend.pdf]", "name": "Pieter Jansen", "raw": {}}
+{"ts": "2026-05-08T16:48:59.227+00:00", "from": "31676543210", "type": "text", "text": "Is er nog plek deze week?", "name": null, "raw": {}}
