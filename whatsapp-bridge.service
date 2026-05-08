@@ -1,0 +1,18 @@
+[Unit]
+Description=WhatsApp Cloud API Readonly Bridge
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/whatsapp-bridge
+ExecStart=/usr/bin/python3 /opt/whatsapp-bridge/bridge.py
+Restart=always
+RestartSec=5
+Environment=WA_VERIFY_TOKEN=your-secret-verify-token
+Environment=WA_PORT=3100
+Environment=WA_INBOX=/opt/whatsapp-bridge/inbox/messages.jsonl
+StandardOutput=append:/var/log/whatsapp-bridge.log
+StandardError=append:/var/log/whatsapp-bridge.log
+
+[Install]
+WantedBy=multi-user.target

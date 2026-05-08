@@ -1,0 +1,13 @@
+services:
+  whatsapp-bridge:
+    build: .
+    ports:
+      - "3100:3100"
+    environment:
+      - WA_VERIFY_TOKEN=${WA_VERIFY_TOKEN:-change-me}
+      - WA_INBOX=/app/inbox/messages.jsonl
+      - WA_PORT=3100
+      - WA_WEBHOOK_PATH=/webhook
+    volumes:
+      - ./inbox:/app/inbox
+    restart: unless-stopped
