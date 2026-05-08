@@ -4,3 +4,8 @@ inbox/
 __pycache__/
 *.pyc
 .DS_Store
+.claude-dev-helper/
+.plugin-config/
+.complexity-log.md
+.session-summary.md
+.todos-report.md/

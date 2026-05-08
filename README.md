@@ -5,9 +5,9 @@
 A zero-dependency Python bridge that receives WhatsApp messages via the **official Meta Cloud API** and turns them into an actionable Telegram checklist your team can discuss.
 
 ```
-WhatsApp → Meta Cloud API → ChakraHQ (free BSP) → bridge.py → Telegram digest
-                                                       ↓
-                                                  messages.jsonl
+WhatsApp → Meta Cloud API → Your webhook URL → bridge.py → Telegram digest
+                                                    ↓
+                                               messages.jsonl
 ```
 
 ## Why this exists
@@ -16,6 +16,23 @@ Every agency, freelancer, and small business has the same problem: customers sen
 
 This bridge fixes that — for free, in 5 minutes, without risking your WhatsApp account.
 
+## Nothing like this exists
+
+We checked. There are [649-star PHP wrappers](https://github.com/netflie/whatsapp-cloud-api) and [541-star Python SDKs](https://github.com/david-lev/pywa) for the Cloud API — but those are **libraries**, not solutions. You still need to build everything yourself.
+
+There are WhatsApp-to-Telegram bridges like [watgbridge](https://github.com/akshettrj/watgbridge) — but they **all use Baileys**, the reverse-engineered protocol that gets accounts banned.
+
+There's [wacrawl](https://github.com/steipete/wacrawl) for archiving — but it reads from your **local desktop SQLite**, not from webhooks.
+
+**The gap:** Nobody combined official Meta Cloud API + readonly webhook receiver + Telegram digest + zero dependencies. Until now.
+
+| What exists | What's missing |
+|---|---|
+| Cloud API wrapper libraries (PHP, Python, Node) | A ready-to-run bridge you deploy in 5 minutes |
+| Baileys-based Telegram bridges (ban risk) | An official API bridge that's safe for business |
+| Enterprise platforms ($$$) | A free, self-hosted alternative |
+| Local-only archivers | Webhook-based real-time monitoring |
+
 ## What you get
 
 **📱 WhatsApp → JSONL inbox** — Every incoming message is saved to a local file. Text, images, documents, locations, contacts, reactions — everything.
@@ -23,6 +40,10 @@ This bridge fixes that — for free, in 5 minutes, without risking your WhatsApp
 **📋 Telegram task digest** — Run `digest.py` on a schedule and your team gets a formatted checklist in Telegram. Discuss, assign, resolve — right where you already are.
 
 **👀 Real-time tail** — `reader.py` follows your inbox live, like `tail -f` for WhatsApp.
+
+**📊 Inbox statistics** — `stats.py` shows message counts, top contacts, peak hours, daily activity. Know who's messaging and when.
+
+**🔌 API server** — `examples/api-server.py` exposes your inbox as a JSON API. Connect it to dashboards, CRMs, or AI agents.
 
 ## 100% free. 100% official. 0% ban risk.
 
@@ -37,12 +58,13 @@ This bridge fixes that — for free, in 5 minutes, without risking your WhatsApp
 
 ### How it stays free
 
-- **Meta Cloud API**: First 1,000 service-initiated conversations per month are free
-- **ChakraHQ**: Free tier as Business Solution Provider — they handle the Meta partnership, you get the webhooks
+- **Meta Cloud API**: First 1,000 service-initiated conversations per month are free. Receiving messages (webhooks) is always free — you only pay when you *send*
+- **Business Solution Provider** (optional): Use a BSP like ChakraHQ for easier setup, or connect directly via the Meta Developer Console — both work
 - **This bridge**: MIT licensed, zero dependencies, runs on anything with Python 3.8+
 - **Telegram Bot API**: Free, unlimited messages
+- **Hosting**: A €5/month VPS is more than enough. Or use your existing server
 
-**Total cost: €0/month** for most small businesses.
+**Total cost: €0/month** for receiving and monitoring messages.
 
 ## The stack
 
@@ -57,9 +79,8 @@ This bridge fixes that — for free, in 5 minutes, without risking your WhatsApp
 └──────────────────────┬──────────────────────────────┘
                        ▼
 ┌─────────────────────────────────────────────────────┐
-│  ChakraHQ (free BSP)                                │
-│  Meta-approved Technology Partner                   │
-│  Passes webhook through to your server              │
+│  Your webhook URL (direct or via BSP like ChakraHQ) │
+│  Meta sends every incoming message here             │
 └──────────────────────┬──────────────────────────────┘
                        ▼
 ┌─────────────────────────────────────────────────────┐
