@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Simple inbox reader — tail the JSONL inbox in real-time or query it.
 

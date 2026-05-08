@@ -4,8 +4,11 @@ inbox/
 __pycache__/
 *.pyc
 .DS_Store
-.claude-dev-helper/
+.browser-pilot/
 .plugin-config/
+.claude-dev-helper/
 .complexity-log.md
 .session-summary.md
 .todos-report.md/
+.pair-programming-session.md
+promo/

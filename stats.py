@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Inbox statistics — show message counts, top contacts, activity by hour.
 

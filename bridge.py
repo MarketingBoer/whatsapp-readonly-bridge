@@ -5,8 +5,9 @@ Receives webhook events from the official Meta Cloud API,
 extracts messages, and appends them to a local JSONL file.
 Read-only by design: this bridge never sends messages.
 
-Zero dependencies beyond Python 3.8+ stdlib.
+Zero dependencies beyond Python 3.10+ stdlib.
 """
+from __future__ import annotations
 import json
 import os
 from datetime import datetime, timezone
@@ -62,6 +63,11 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urlparse(self.path)
+        if parsed.path == "/health":
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"ok")
+            return
         if parsed.path in (WEBHOOK_PATH, f"{WEBHOOK_PATH}/whatsapp-cloud"):
             params = parse_qs(parsed.query)
             mode = params.get("hub.mode", [""])[0]
@@ -77,6 +83,12 @@ class WebhookHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self):
+        parsed = urlparse(self.path)
+        if parsed.path not in (WEBHOOK_PATH, f"{WEBHOOK_PATH}/whatsapp-cloud"):
+            self.send_response(404)
+            self.end_headers()
+            return
+
         length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(length)
 

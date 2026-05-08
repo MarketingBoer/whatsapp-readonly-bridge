@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Telegram digest — reads the JSONL inbox and posts a summary to Telegram.
 

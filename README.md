@@ -60,7 +60,7 @@ There's [wacrawl](https://github.com/steipete/wacrawl) for archiving — but it 
 
 - **Meta Cloud API**: First 1,000 service-initiated conversations per month are free. Receiving messages (webhooks) is always free — you only pay when you *send*
 - **Business Solution Provider** (optional): Use a BSP like ChakraHQ for easier setup, or connect directly via the Meta Developer Console — both work
-- **This bridge**: MIT licensed, zero dependencies, runs on anything with Python 3.8+
+- **This bridge**: MIT licensed, zero dependencies, runs on anything with Python 3.10+
 - **Telegram Bot API**: Free, unlimited messages
 - **Hosting**: A €5/month VPS is more than enough. Or use your existing server
 
@@ -263,7 +263,7 @@ The JSONL inbox is a universal interface. Plug it into anything:
 
 | Integration | How |
 |---|---|
-| **AI agents** (Hermes, OpenClaw, LangChain) | Read JSONL, summarize, route to right agent |
+| **AI agents** (LangChain, CrewAI, custom) | Read JSONL, summarize, route to right agent |
 | **CRM** | Cron job that POSTs new messages to your CRM API |
 | **Slack/Discord** | Replace `digest.py` Telegram calls with Slack webhook |
 | **Dashboard** | Expose via simple API endpoint ([example included](examples/api-server.py)) |
@@ -275,7 +275,7 @@ The JSONL inbox is a universal interface. Plug it into anything:
 - **Tunnel:** Use Cloudflare Tunnel (free, stable) over ngrok for production
 - **Backup:** The JSONL file is your data. Back it up. `cp messages.jsonl messages-$(date +%F).jsonl`
 - **Rotation:** For high-volume numbers, rotate the file monthly and archive
-- **Monitoring:** Bridge returns 403 on `/health` — use this to check if it's alive
+- **Monitoring:** Bridge returns 200 on `/health` — use this for uptime checks and Docker healthchecks
 - **Permissions:** The inbox file is append-only by design. Your consumer should only need read access
 
 ## FAQ
