@@ -2,7 +2,7 @@
 
 A tiny read-only WhatsApp bridge: official Meta Cloud API in, Telegram / Discord / bots / dashboards out.
 
-Receive every incoming WhatsApp message on your server. Forward it anywhere. ~100 lines Python, zero dependencies, free forever.
+Receive every incoming WhatsApp message on your server. Forward it anywhere. Single-file Python, zero dependencies, free forever.
 
 ```
 Incoming WhatsApp message → your server → Telegram, Discord, AI bot, CRM, dashboard — anything.
@@ -81,7 +81,7 @@ Receiving WhatsApp messages via the Cloud API is free. Always. You only pay when
 └────────────────────────┬─────────────────────────┘
                          ▼
 ┌──────────────────────────────────────────────────┐
-│  bridge.py (~100 lines Python, zero deps)        │
+│  bridge.py (single file Python, zero deps)       │
 │  Extracts message, appends to JSONL file         │
 │  READ-ONLY: cannot send messages back            │
 └──────┬──────────────────┬────────────────────────┘
@@ -135,7 +135,7 @@ sudo systemctl edit whatsapp-bridge  # set your WA_VERIFY_TOKEN
 sudo systemctl enable --now whatsapp-bridge
 ```
 
-### 4. Set up Telegram digest (optional)
+### 4. Forward to Telegram (optional)
 
 ```bash
 # Create a bot via @BotFather, get your chat ID via @userinfobot
@@ -147,6 +147,20 @@ python3 digest.py --dry-run
 
 # Run every hour via cron
 0 * * * * cd /opt/whatsapp-bridge && python3 digest.py --hours 1
+```
+
+### 5. Forward to Discord (optional)
+
+```bash
+# Create a webhook in your Discord channel settings
+export DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/..."
+export WA_INBOX="messages.jsonl"
+
+# Test it
+python3 examples/discord-webhook.py
+
+# Run every hour via cron
+0 * * * * cd /opt/whatsapp-bridge && python3 examples/discord-webhook.py
 ```
 
 ## What else you can do
@@ -168,7 +182,7 @@ python3 stats.py               # message counts, top contacts, peak hours
 python3 examples/api-server.py  # JSON API on port 3101
 ```
 
-**Feed into anything:** The inbox is a JSONL file — one JSON object per line. Read it from any language, pipe it into AI agents, CRMs, databases, Slack, Discord, n8n, Make.com.
+**Feed into anything:** The inbox is a JSONL file — one JSON object per line. Read it from any language, pipe it into AI agents, CRMs, databases, Slack, n8n, Make.com.
 
 ## Sample data
 
@@ -209,7 +223,7 @@ Yes. Cloud API works alongside WhatsApp Business app. Messages arrive in both pl
 Yes. Your bot reads the JSONL file or calls the API server. It gets every WhatsApp message without touching WhatsApp itself.
 
 **Can I forward to Discord / Slack / my own app?**
-Yes. The JSONL file is a universal interface — read it from any language and send it wherever you want. The included Telegram digest is just one example.
+Yes. A [Discord example](examples/discord-webhook.py) is included. The JSONL file is a universal interface — read it from any language and send it wherever you want.
 
 **Why not Baileys?**
 Baileys reverse-engineers WhatsApp's protocol. When WhatsApp updates, your number gets banned. The official API is free for reading, so there's no reason to risk it.
