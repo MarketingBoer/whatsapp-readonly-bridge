@@ -1,25 +1,27 @@
 # WhatsApp Readonly Bridge
 
-**Your customers send WhatsApp messages. They disappear into someone's phone. You lose the lead.**
+A tiny read-only WhatsApp bridge: official Meta Cloud API in, Telegram / Discord / bots / dashboards out.
 
-This bridge catches every incoming WhatsApp message and turns it into a team task list on Telegram — so nothing falls through the cracks. Free, safe, takes 5 minutes to set up.
+Receive every incoming WhatsApp message on your server. Forward it anywhere. ~100 lines Python, zero dependencies, free forever.
 
 ```
-Customer sends WhatsApp → your team gets a Telegram checklist → discuss, assign, done.
+Incoming WhatsApp message → your server → Telegram, Discord, AI bot, CRM, dashboard — anything.
 ```
+
+No auto-replies. No WhatsApp Web scraping. No Baileys. Read-only by design.
 
 ## Who is this for?
 
-- **Agencies and freelancers** where clients message on WhatsApp but nobody tracks follow-ups
-- **Small businesses** that want a shared WhatsApp inbox without paying €50/month for a SaaS tool
-- **Anyone with a chatbot** who wants to read and discuss WhatsApp messages without ever opening WhatsApp
-- **Developers** who need a clean WhatsApp data feed for AI agents, CRMs, or dashboards
+- **Developers building AI agents** who need WhatsApp as an input layer — pipe messages into your bot without touching WhatsApp
+- **Agencies and freelancers** who want a shared WhatsApp inbox without paying €50/month for a SaaS tool
+- **Small businesses** where customers message on WhatsApp but nobody tracks follow-ups
+- **Self-hosters** who want WhatsApp data on their own server, in a simple JSONL file they control
 
-A developer sets it up once. The team uses Telegram from there.
+A developer sets it up once. Everyone benefits from there.
 
-## What your team sees
+## What it looks like
 
-Every hour (or however often you want), your Telegram gets this:
+Set up the built-in Telegram digest and your team gets this every hour:
 
 ```
 📱 WhatsApp Digest — 6 messages
@@ -41,13 +43,13 @@ Every hour (or however often you want), your Telegram gets this:
 Reply to this message to discuss actions.
 ```
 
-Your team discusses it right there. Someone picks it up. No message gets lost.
+Or skip Telegram entirely and feed the JSONL file into your own bot, dashboard, or webhook.
 
 ## Why not Baileys?
 
-Every WhatsApp bridge on GitHub uses [Baileys](https://github.com/WhiskeySockets/Baileys) — a reverse-engineered protocol. It works until WhatsApp detects it and **bans your number**. We've seen it happen to agencies.
+Every WhatsApp bridge on GitHub uses [Baileys](https://github.com/WhiskeySockets/Baileys) — a reverse-engineered protocol. It works until WhatsApp detects it and **bans your number**.
 
-This bridge uses the **official Meta Cloud API**. Same infrastructure that WhatsApp Business Platform runs on. Zero ban risk.
+This bridge uses the **official Meta Cloud API**. Same infrastructure that WhatsApp Business Platform runs on.
 
 | | This bridge | Baileys |
 |---|---|---|
@@ -69,26 +71,27 @@ Receiving WhatsApp messages via the Cloud API is free. Always. You only pay when
 ## How it works
 
 ```
-┌──────────────────────────────────────────────┐
-│  Customer sends a WhatsApp message           │
-└─────────────────────┬────────────────────────┘
-                      ▼
-┌──────────────────────────────────────────────┐
-│  Meta Cloud API (official, free)             │
-│  Fires a webhook to your server              │
-└─────────────────────┬────────────────────────┘
-                      ▼
-┌──────────────────────────────────────────────┐
-│  bridge.py (~100 lines Python, zero deps)    │
-│  Extracts message, appends to JSONL file     │
-│  READ-ONLY: cannot send messages back        │
-└──────────┬──────────────────┬────────────────┘
-           ▼                  ▼
-┌─────────────────┐  ┌────────────────────────┐
-│  messages.jsonl │  │  Telegram digest (cron) │
-│  Your data,     │  │  Team checklist         │
-│  your server    │  │  Discuss & assign       │
-└─────────────────┘  └────────────────────────┘
+┌──────────────────────────────────────────────────┐
+│  Someone sends you a WhatsApp message            │
+└────────────────────────┬─────────────────────────┘
+                         ▼
+┌──────────────────────────────────────────────────┐
+│  Meta Cloud API (official, free)                 │
+│  Fires a webhook to your server                  │
+└────────────────────────┬─────────────────────────┘
+                         ▼
+┌──────────────────────────────────────────────────┐
+│  bridge.py (~100 lines Python, zero deps)        │
+│  Extracts message, appends to JSONL file         │
+│  READ-ONLY: cannot send messages back            │
+└──────┬──────────────────┬────────────────────────┘
+       ▼                  ▼
+┌─────────────────┐  ┌────────────────────────────┐
+│  messages.jsonl │  │  Forward anywhere:         │
+│  Your data,     │  │  Telegram, Discord, Slack, │
+│  your server    │  │  AI bot, CRM, dashboard,   │
+│                 │  │  n8n, Make.com, webhook    │
+└─────────────────┘  └────────────────────────────┘
 ```
 
 ## Quick start
@@ -132,7 +135,7 @@ sudo systemctl edit whatsapp-bridge  # set your WA_VERIFY_TOKEN
 sudo systemctl enable --now whatsapp-bridge
 ```
 
-### 4. Set up Telegram digest
+### 4. Set up Telegram digest (optional)
 
 ```bash
 # Create a bot via @BotFather, get your chat ID via @userinfobot
@@ -189,7 +192,7 @@ Not a limitation — a feature.
 1. **No ban risk** — The bridge literally cannot send messages, even if your code has a bug
 2. **No costs** — Sending costs money. Reading is free
 3. **No compliance issues** — Monitoring ≠ communicating. Different GDPR category
-4. **Better workflow** — Discuss on Telegram, reply from WhatsApp Business app with full context
+4. **No lock-in** — JSONL is the simplest possible format. Switch tools anytime
 
 ## FAQ
 
@@ -202,8 +205,11 @@ No. This is the official Meta Cloud API, not a reverse-engineered hack. Same inf
 **Can I still use my phone?**
 Yes. Cloud API works alongside WhatsApp Business app. Messages arrive in both places.
 
-**Can I connect my chatbot to this?**
+**Can I connect my AI bot to this?**
 Yes. Your bot reads the JSONL file or calls the API server. It gets every WhatsApp message without touching WhatsApp itself.
+
+**Can I forward to Discord / Slack / my own app?**
+Yes. The JSONL file is a universal interface — read it from any language and send it wherever you want. The included Telegram digest is just one example.
 
 **Why not Baileys?**
 Baileys reverse-engineers WhatsApp's protocol. When WhatsApp updates, your number gets banned. The official API is free for reading, so there's no reason to risk it.
@@ -217,4 +223,4 @@ MIT — use it, fork it, sell it. A star helps others find it.
 
 ---
 
-Built by [Mediadeboer](https://mediadeboer.nl) — we use this in production every day to catch WhatsApp messages and route them to AI agents.
+Built by [Mediadeboer](https://mediadeboer.nl) — we use this in production every day to receive WhatsApp messages and route them to AI agents.
