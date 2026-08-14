@@ -1,134 +1,198 @@
-"""
-WhatsApp Cloud API → JSONL readonly bridge.
+"""WhatsApp Cloud API readonly bridge.
 
-Receives webhook events from the official Meta Cloud API,
-extracts messages, and appends them to a local JSONL file.
-Read-only by design: this bridge never sends messages.
-
-Zero dependencies beyond Python 3.10+ stdlib.
+Import-safe configuration lives here; HTTP handling is wired by the server
+boundary in the next implementation task.
 """
 from __future__ import annotations
-import json
+
+from dataclasses import dataclass
 import os
-from datetime import datetime, timezone
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse, parse_qs
-
-VERIFY_TOKEN = os.environ.get("WA_VERIFY_TOKEN", "change-me")
-INBOX_FILE = os.environ.get("WA_INBOX", "./inbox/messages.jsonl")
-PORT = int(os.environ.get("WA_PORT", "3100"))
-WEBHOOK_PATH = os.environ.get("WA_WEBHOOK_PATH", "/webhook")
+from pathlib import Path
+import sys
+from types import MappingProxyType
+from typing import Mapping
+from urllib.parse import urlsplit
 
 
-def append_message(entry: dict):
-    os.makedirs(os.path.dirname(INBOX_FILE) or ".", exist_ok=True)
-    with open(INBOX_FILE, "a") as f:
-        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+class ConfigError(ValueError):
+    pass
 
 
-def extract_text(msg: dict) -> str:
-    msg_type = msg.get("type", "text")
-    if msg_type == "text":
-        return msg.get("text", {}).get("body", "")
-    if msg_type == "image":
-        return msg.get("image", {}).get("caption", "[image]")
-    if msg_type == "video":
-        return msg.get("video", {}).get("caption", "[video]")
-    if msg_type == "document":
-        return msg.get("document", {}).get("filename", "[document]")
-    if msg_type == "audio":
-        return "[audio]"
-    if msg_type == "sticker":
-        return "[sticker]"
-    if msg_type == "location":
-        loc = msg.get("location", {})
-        return f"[location: {loc.get('latitude')},{loc.get('longitude')}]"
-    if msg_type == "contacts":
-        contacts = msg.get("contacts", [{}])
-        names = [c.get("name", {}).get("formatted_name", "?") for c in contacts]
-        return f"[contacts: {', '.join(names)}]"
-    if msg_type == "interactive":
-        return json.dumps(msg.get("interactive", {}), ensure_ascii=False)
-    if msg_type == "reaction":
-        return msg.get("reaction", {}).get("emoji", "[reaction]")
-    if msg_type == "button":
-        return msg.get("button", {}).get("text", "[button]")
-    return f"[{msg_type}]"
+@dataclass(frozen=True)
+class BridgeConfig:
+    verify_token: str
+    app_secret: str
+    bind: str
+    port: int
+    inbox: Path
+    webhook_path: str
+    log_level: str
+    store_raw: bool
+    request_timeout: float
+    shutdown_timeout: float
+
+    @property
+    def accepted_webhook_paths(self) -> tuple[str, str]:
+        return (self.webhook_path, f"{self.webhook_path}/whatsapp-cloud")
 
 
-class WebhookHandler(BaseHTTPRequestHandler):
+_DEFAULTS = MappingProxyType({
+    "WA_BIND": "127.0.0.1",
+    "WA_PORT": "3100",
+    "WA_INBOX": "./inbox/messages.jsonl",
+    "WA_WEBHOOK_PATH": "/webhook",
+    "WA_LOG_LEVEL": "INFO",
+    "WA_STORE_RAW": "true",
+    "WA_REQUEST_TIMEOUT": "10",
+    "WA_SHUTDOWN_TIMEOUT": "15",
+})
 
-    def log_message(self, fmt, *args):
-        print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] {fmt % args}")
+_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
 
-    def do_GET(self):
-        parsed = urlparse(self.path)
-        if parsed.path == "/health":
-            self.send_response(200)
-            self.end_headers()
-            self.wfile.write(b"ok")
-            return
-        if parsed.path in (WEBHOOK_PATH, f"{WEBHOOK_PATH}/whatsapp-cloud"):
-            params = parse_qs(parsed.query)
-            mode = params.get("hub.mode", [""])[0]
-            token = params.get("hub.verify_token", [""])[0]
-            challenge = params.get("hub.challenge", [""])[0]
-            if mode == "subscribe" and token == VERIFY_TOKEN:
-                self.send_response(200)
-                self.end_headers()
-                self.wfile.write(challenge.encode())
-                print("[bridge] Webhook verification OK")
-                return
-        self.send_response(403)
-        self.end_headers()
 
-    def do_POST(self):
-        parsed = urlparse(self.path)
-        if parsed.path not in (WEBHOOK_PATH, f"{WEBHOOK_PATH}/whatsapp-cloud"):
-            self.send_response(404)
-            self.end_headers()
-            return
+def load_config(env: Mapping[str, str], base_dir: Path) -> BridgeConfig:
+    values = dict(_DEFAULTS)
+    values.update(_load_dotenv(Path(base_dir) / ".env"))
+    values.update(dict(env))
 
-        length = int(self.headers.get("Content-Length", 0))
-        body = self.rfile.read(length)
+    verify_token = _required_secret(values.get("WA_VERIFY_TOKEN"),
+                                    "WA_VERIFY_TOKEN")
+    app_secret = _required_secret(values.get("WA_APP_SECRET"), "WA_APP_SECRET")
+    bind = _non_empty(values.get("WA_BIND"), "WA_BIND")
+    port = _parse_int_range(values.get("WA_PORT"), "WA_PORT", 1, 65535)
+    inbox = Path(_non_empty(values.get("WA_INBOX"), "WA_INBOX"))
+    webhook_path = _parse_webhook_path(values.get("WA_WEBHOOK_PATH"))
+    log_level = _parse_log_level(values.get("WA_LOG_LEVEL"))
+    store_raw = _parse_bool(values.get("WA_STORE_RAW"), "WA_STORE_RAW")
+    request_timeout = _parse_float_range(
+        values.get("WA_REQUEST_TIMEOUT"), "WA_REQUEST_TIMEOUT", 1.0, 60.0,
+    )
+    shutdown_timeout = _parse_float_range(
+        values.get("WA_SHUTDOWN_TIMEOUT"), "WA_SHUTDOWN_TIMEOUT", 1.0, 60.0,
+    )
 
-        try:
-            data = json.loads(body)
-        except Exception:
-            self.send_response(400)
-            self.end_headers()
-            return
+    return BridgeConfig(
+        verify_token=verify_token,
+        app_secret=app_secret,
+        bind=bind,
+        port=port,
+        inbox=inbox,
+        webhook_path=webhook_path,
+        log_level=log_level,
+        store_raw=store_raw,
+        request_timeout=request_timeout,
+        shutdown_timeout=shutdown_timeout,
+    )
 
-        count = 0
-        for entry in data.get("entry", []):
-            for change in entry.get("changes", []):
-                value = change.get("value", {})
-                for msg in value.get("messages", []):
-                    phone = msg.get("from", "unknown")
-                    msg_type = msg.get("type", "text")
-                    text = extract_text(msg)
 
-                    record = {
-                        "ts": datetime.now(timezone.utc).isoformat(),
-                        "from": phone,
-                        "type": msg_type,
-                        "text": text,
-                        "name": value.get("contacts", [{}])[0]
-                            .get("profile", {}).get("name"),
-                        "raw": msg,
-                    }
-                    append_message(record)
-                    count += 1
-                    print(f"[bridge] +{phone} ({msg_type}): {text[:80]}")
+def main() -> int:
+    try:
+        load_config(os.environ, Path(__file__).resolve().parent)
+    except ConfigError as exc:
+        print(f"ConfigError: {exc}", file=sys.stderr)
+        return 1
+    print("bridge server startup is implemented in the HTTP hardening task",
+          file=sys.stderr)
+    return 1
 
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(f"{count} messages received".encode())
+
+def _load_dotenv(path: Path) -> dict[str, str]:
+    if not path.exists():
+        return {}
+
+    result: dict[str, str] = {}
+    for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(),
+                                   start=1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if "=" not in line:
+            raise ConfigError(f".env line {line_no}: missing '='")
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if not key:
+            raise ConfigError(f".env line {line_no}: empty key")
+        if key in result:
+            raise ConfigError(f".env line {line_no}: duplicate key")
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+            value = value[1:-1]
+        elif value.startswith(("'", '"')) or value.endswith(("'", '"')):
+            raise ConfigError(f".env line {line_no}: mismatched quotes")
+        result[key] = value
+    return result
+
+
+def _required_secret(value: str | None, name: str) -> str:
+    value = _non_empty(value, name)
+    lowered = value.lower()
+    if lowered == "change-me" or lowered.startswith("your-"):
+        raise ConfigError(f"{name} must not be a placeholder")
+    return value
+
+
+def _non_empty(value: str | None, name: str) -> str:
+    if value is None or value == "":
+        raise ConfigError(f"{name} is required")
+    return value
+
+
+def _parse_int_range(value: str | None, name: str, minimum: int,
+                     maximum: int) -> int:
+    value = _non_empty(value, name)
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise ConfigError(f"{name} must be an integer") from exc
+    if str(parsed) != value.strip():
+        raise ConfigError(f"{name} must be an integer")
+    if parsed < minimum or parsed > maximum:
+        raise ConfigError(f"{name} must be between {minimum} and {maximum}")
+    return parsed
+
+
+def _parse_float_range(value: str | None, name: str, minimum: float,
+                       maximum: float) -> float:
+    value = _non_empty(value, name)
+    try:
+        parsed = float(value)
+    except ValueError as exc:
+        raise ConfigError(f"{name} must be a number") from exc
+    if parsed < minimum or parsed > maximum:
+        raise ConfigError(f"{name} must be between {minimum:g} and {maximum:g}")
+    return parsed
+
+
+def _parse_bool(value: str | None, name: str) -> bool:
+    value = _non_empty(value, name).lower()
+    if value in {"true", "1", "yes", "on"}:
+        return True
+    if value in {"false", "0", "no", "off"}:
+        return False
+    raise ConfigError(f"{name} must be a boolean")
+
+
+def _parse_log_level(value: str | None) -> str:
+    level = _non_empty(value, "WA_LOG_LEVEL").upper()
+    if level not in _LOG_LEVELS:
+        raise ConfigError("WA_LOG_LEVEL is invalid")
+    return level
+
+
+def _parse_webhook_path(value: str | None) -> str:
+    value = _non_empty(value, "WA_WEBHOOK_PATH")
+    split = urlsplit(value)
+    if split.scheme or split.netloc or split.query or split.fragment:
+        raise ConfigError("WA_WEBHOOK_PATH must be a URL path only")
+    path = split.path.rstrip("/") or "/"
+    if not path.startswith("/"):
+        raise ConfigError("WA_WEBHOOK_PATH must be absolute")
+    if path in {"/", "/health"}:
+        raise ConfigError("WA_WEBHOOK_PATH is reserved")
+    if any(segment == ".." for segment in path.split("/")):
+        raise ConfigError("WA_WEBHOOK_PATH must not contain '..'")
+    return path
 
 
 if __name__ == "__main__":
-    print(f"[bridge] WhatsApp readonly bridge on port {PORT}")
-    print(f"[bridge] Inbox: {INBOX_FILE}")
-    print(f"[bridge] Webhook path: {WEBHOOK_PATH}")
-    server = HTTPServer(("0.0.0.0", PORT), WebhookHandler)
-    server.serve_forever()
+    raise SystemExit(main())
