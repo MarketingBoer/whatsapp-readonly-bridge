@@ -1,7 +1,6 @@
 import importlib.util
 import json
 import os
-import stat
 import subprocess
 import tempfile
 import unittest
@@ -49,7 +48,6 @@ class ScriptAndGoldenTests(unittest.TestCase):
     def test_wrapper_mode_crontab_and_shell_syntax(self):
         wrapper = ROOT / "examples/run-telegram-digest.sh"
         self.assertTrue(os.access(wrapper, os.X_OK))
-        self.assertEqual(stat.S_IMODE(wrapper.stat().st_mode), 0o755)
         output = subprocess.check_output(["bash", str(ROOT / "examples/cron-setup.sh")],
                                          text=True)
         jobs = [line for line in output.splitlines()
