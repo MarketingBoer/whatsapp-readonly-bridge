@@ -1,0 +1,6 @@
+services:
+  bridge:
+    image: whatsapp-readonly-bridge:local
+    build:
+      context: .
+      dockerfile: Dockerfile

@@ -1,9 +1,18 @@
 .env
+.env.*
+!.env.example
 inbox/
+*.jsonl
 *.log
 __pycache__/
 *.pyc
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+build/
 .DS_Store
+.memsearch/
 .browser-pilot/
 .plugin-config/
 .claude-dev-helper/
@@ -12,3 +21,5 @@ __pycache__/
 .todos-report.md/
 .pair-programming-session.md
 promo/
+mcp_server.py
+tests/test_mcp_server.py
