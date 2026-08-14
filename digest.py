@@ -1,150 +1,130 @@
 from __future__ import annotations
-"""
-Telegram digest — reads the JSONL inbox and posts a summary to Telegram.
+"""Create and optionally send a periodic Telegram digest."""
 
-Run on a schedule (cron, systemd timer) or manually:
-    python3 digest.py                   # last hour
-    python3 digest.py --hours 24        # last 24 hours
-    python3 digest.py --since 2026-05-01
-
-Each message becomes a checklist item. Your team discusses and
-resolves them right inside Telegram — no extra app needed.
-"""
+import argparse
+from collections import defaultdict
+from datetime import datetime, timezone, timedelta
 import json
 import os
+from pathlib import Path
 import sys
-import urllib.request
 import urllib.parse
-from datetime import datetime, timezone, timedelta
-from collections import defaultdict
+import urllib.request
 
-INBOX_FILE = os.environ.get("WA_INBOX", "./inbox/messages.jsonl")
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+from jsonl_store import read_jsonl
 
 
-def load_messages(since: datetime) -> list[dict]:
+DEFAULT_INBOX = "./inbox/messages.jsonl"
+TELEGRAM_LIMIT = 4096
+
+
+def parse_ts(value: object) -> datetime | None:
+    if not isinstance(value, str):
+        return None
     try:
-        with open(INBOX_FILE) as f:
-            lines = f.readlines()
-    except FileNotFoundError:
-        return []
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
-    messages = []
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            msg = json.loads(line)
-            ts = datetime.fromisoformat(msg["ts"]).replace(tzinfo=timezone.utc)
-            if ts >= since:
-                messages.append(msg)
-        except (json.JSONDecodeError, KeyError, ValueError):
-            continue
-    return messages
+
+def load_messages(since: datetime, path: str | Path | None = None) -> list[dict]:
+    since = since.astimezone(timezone.utc)
+    records = read_jsonl(Path(path or os.environ.get("WA_INBOX", DEFAULT_INBOX))).records
+    return [record for record in records
+            if (ts := parse_ts(record.get("ts"))) is not None and ts >= since]
 
 
 def format_digest(messages: list[dict]) -> str:
     if not messages:
-        return "📭 No new WhatsApp messages."
-
+        return "No new WhatsApp messages."
     by_contact = defaultdict(list)
     for msg in messages:
         phone = msg.get("from", "unknown")
-        name = msg.get("name") or phone
-        key = f"{name} ({phone})" if msg.get("name") else phone
+        key = f"{msg.get('name')} ({phone})" if msg.get("name") else phone
         by_contact[key].append(msg)
-
-    lines = [f"📱 *WhatsApp Digest* — {len(messages)} messages\n"]
-
+    lines = [f"WhatsApp Digest - {len(messages)} messages", ""]
     for contact, msgs in by_contact.items():
-        lines.append(f"\n👤 *{_escape_md(contact)}*")
+        lines.append(contact)
         for msg in msgs:
-            ts = datetime.fromisoformat(msg["ts"])
-            time_str = ts.strftime("%H:%M")
-            text = msg.get("text", "")[:120]
-            emoji = _type_emoji(msg.get("type", "text"))
-            lines.append(f"  ☐ `{time_str}` {emoji} {_escape_md(text)}")
-
-    lines.append(f"\n_Reply to this message to discuss actions\\._")
-    return "\n".join(lines)
-
-
-def _type_emoji(msg_type: str) -> str:
-    return {
-        "text": "💬",
-        "image": "📷",
-        "video": "🎥",
-        "audio": "🎤",
-        "document": "📄",
-        "location": "📍",
-        "contacts": "👥",
-        "sticker": "🏷",
-        "reaction": "❤️",
-    }.get(msg_type, "📨")
+            ts = parse_ts(msg.get("ts"))
+            time_str = ts.strftime("%H:%M") if ts else "??:??"
+            prefix = "" if msg.get("type") == "text" else f"[{msg.get('type', 'unknown')}] "
+            lines.append(f"  [ ] {time_str} {prefix}{msg.get('text', '')}")
+        lines.append("")
+    lines.append("Reply in Telegram to discuss actions; this bridge never replies on WhatsApp.")
+    return "\n".join(lines).rstrip()
 
 
-def _escape_md(text: str) -> str:
-    for char in ("_", "*", "[", "]", "(", ")", "~", "`", ">", "#", "+", "-", "=", "|", "{", "}", ".", "!"):
-        text = text.replace(char, f"\\{char}")
-    return text
+def split_chunks(text: str, limit: int = TELEGRAM_LIMIT) -> list[str]:
+    chunks = []
+    remaining = text
+    while len(remaining) > limit:
+        cut = remaining.rfind("\n", 0, limit + 1)
+        if cut <= 0:
+            cut = limit
+        chunks.append(remaining[:cut])
+        remaining = remaining[cut:].lstrip("\n")
+    chunks.append(remaining)
+    return chunks
 
 
-def send_telegram(text: str):
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        print(text)
-        print("\n[digest] Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID to send to Telegram.")
-        return False
-
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = urllib.parse.urlencode({
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": text,
-        "parse_mode": "MarkdownV2",
-        "disable_web_page_preview": "true",
-    }).encode()
-
-    req = urllib.request.Request(url, data=payload)
-    try:
-        with urllib.request.urlopen(req) as resp:
-            result = json.loads(resp.read())
-            if result.get("ok"):
-                print(f"[digest] Sent to Telegram chat {TELEGRAM_CHAT_ID}")
-                return True
-            print(f"[digest] Telegram API error: {result}")
+def send_telegram(text: str, token: str, chat_id: str) -> bool:
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    for chunk in split_chunks(text):
+        payload = urllib.parse.urlencode({
+            "chat_id": chat_id,
+            "text": chunk,
+            "disable_web_page_preview": "true",
+        }).encode("utf-8")
+        request = urllib.request.Request(url, data=payload)
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                ok = 200 <= response.status < 300
+                data = json.loads(response.read() or b"{}")
+        except Exception:
             return False
-    except Exception as e:
-        print(f"[digest] Failed to send: {e}")
-        return False
+        if not ok or not data.get("ok", False):
+            return False
+    return True
 
 
-def main():
-    hours = 1
-    since = None
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--inbox", default=os.environ.get("WA_INBOX", DEFAULT_INBOX))
+    parser.add_argument("--hours", type=float, default=1)
+    parser.add_argument("--since")
+    parser.add_argument("--dry-run", action="store_true")
+    args = parser.parse_args(argv)
 
-    args = sys.argv[1:]
-    i = 0
-    while i < len(args):
-        if args[i] == "--hours" and i + 1 < len(args):
-            hours = float(args[i + 1])
-            i += 2
-        elif args[i] == "--since" and i + 1 < len(args):
-            since = datetime.fromisoformat(args[i + 1]).replace(tzinfo=timezone.utc)
-            i += 2
-        elif args[i] == "--dry-run":
-            os.environ.pop("TELEGRAM_BOT_TOKEN", None)
-            i += 1
-        else:
-            i += 1
+    if args.since:
+        since = parse_ts(args.since)
+        if since is None:
+            print("invalid --since", file=sys.stderr)
+            return 1
+    else:
+        since = datetime.now(timezone.utc) - timedelta(hours=args.hours)
 
-    if since is None:
-        since = datetime.now(timezone.utc) - timedelta(hours=hours)
+    text = format_digest(load_messages(since, args.inbox))
+    if args.dry_run:
+        print(text)
+        return 0
 
-    messages = load_messages(since)
-    digest = format_digest(messages)
-    send_telegram(digest)
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
+    if not token or not chat_id:
+        print(text)
+        print("Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID to send to Telegram.",
+              file=sys.stderr)
+        return 1
+    if not send_telegram(text, token, chat_id):
+        print("Telegram send failed", file=sys.stderr)
+        return 1
+    print("Telegram digest sent")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

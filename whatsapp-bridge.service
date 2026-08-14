@@ -1,18 +1,46 @@
 [Unit]
-Description=WhatsApp Cloud API Readonly Bridge
-After=network.target
+Description=WhatsApp Readonly Bridge
+Documentation=https://github.com/MarketingBoer/whatsapp-readonly-bridge
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/opt/whatsapp-bridge
-ExecStart=/usr/bin/python3 /opt/whatsapp-bridge/bridge.py
-Restart=always
-RestartSec=5
-Environment=WA_VERIFY_TOKEN=your-secret-verify-token
+DynamicUser=yes
+WorkingDirectory=/opt/whatsapp-readonly-bridge
+EnvironmentFile=/etc/whatsapp-readonly-bridge.env
+Environment=WA_BIND=127.0.0.1
 Environment=WA_PORT=3100
-Environment=WA_INBOX=/opt/whatsapp-bridge/inbox/messages.jsonl
-StandardOutput=append:/var/log/whatsapp-bridge.log
-StandardError=append:/var/log/whatsapp-bridge.log
+Environment=WA_INBOX=/var/lib/whatsapp-readonly-bridge/messages.jsonl
+StateDirectory=whatsapp-readonly-bridge
+StateDirectoryMode=0700
+UMask=0077
+ExecStart=/usr/bin/python3 /opt/whatsapp-readonly-bridge/bridge.py
+Restart=on-failure
+RestartSec=5s
+KillSignal=SIGTERM
+TimeoutStopSec=20s
+StandardOutput=journal
+StandardError=journal
+
+# Create /etc/whatsapp-readonly-bridge.env as root-owned mode 0600 with
+# WA_VERIFY_TOKEN and WA_APP_SECRET before starting this unit.
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/whatsapp-readonly-bridge
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
 
 [Install]
 WantedBy=multi-user.target

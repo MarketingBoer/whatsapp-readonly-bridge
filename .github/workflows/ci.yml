@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12", "3.14"]
+    steps:
+      - name: Checkout
+        # actions/checkout v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Set up Python
+        # actions/setup-python v7.0.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile
+        run: python -m compileall -q bridge.py whatsapp_webhook.py jsonl_store.py reader.py digest.py stats.py examples tests scripts
+      - name: Test
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
+
+  deployment:
+    name: Deployment artifacts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        # actions/checkout v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Set up QEMU
+        # docker/setup-qemu-action v4.2.0
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8
+      - name: Set up Buildx
+        # docker/setup-buildx-action v4.2.0
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c
+      - name: Validate Compose
+        run: |
+          WA_VERIFY_TOKEN=ci-verify-token WA_APP_SECRET=ci-app-secret docker compose -f docker-compose.yml config --quiet
+          WA_VERIFY_TOKEN=ci-verify-token WA_APP_SECRET=ci-app-secret docker compose -f docker-compose.yml -f docker-compose.build.yml config --quiet
+      - name: Verify systemd unit
+        run: systemd-analyze verify whatsapp-bridge.service
+      - name: Build image
+        run: docker build --pull --tag whatsapp-readonly-bridge:ci .
+      - name: Container runtime tests
+        run: WHATSAPP_BRIDGE_TEST_IMAGE=whatsapp-readonly-bridge:ci python -m unittest tests.test_container_runtime -v
+      - name: Release audit
+        run: python scripts/release_audit.py --image whatsapp-readonly-bridge:ci

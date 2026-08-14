@@ -1,13 +1,27 @@
 services:
-  whatsapp-bridge:
-    build: .
-    ports:
-      - "3100:3100"
-    environment:
-      - WA_VERIFY_TOKEN=${WA_VERIFY_TOKEN:-change-me}
-      - WA_INBOX=/app/inbox/messages.jsonl
-      - WA_PORT=3100
-      - WA_WEBHOOK_PATH=/webhook
-    volumes:
-      - ./inbox:/app/inbox
+  bridge:
+    image: ${WA_IMAGE:-ghcr.io/marketingboer/whatsapp-readonly-bridge:latest}
+    init: true
     restart: unless-stopped
+    stop_grace_period: 20s
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    ports:
+      - "${WA_HOST:-127.0.0.1}:${WA_HOST_PORT:-3100}:3100"
+    environment:
+      WA_VERIFY_TOKEN: ${WA_VERIFY_TOKEN:?WA_VERIFY_TOKEN is required}
+      WA_APP_SECRET: ${WA_APP_SECRET:?WA_APP_SECRET is required}
+      WA_BIND: 0.0.0.0
+      WA_PORT: "3100"
+      WA_INBOX: /data/messages.jsonl
+      WA_WEBHOOK_PATH: /webhook
+    volumes:
+      - whatsapp-data:/data
+
+volumes:
+  whatsapp-data:
