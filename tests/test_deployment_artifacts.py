@@ -70,8 +70,8 @@ class CIArtifactTests(unittest.TestCase):
 
 class PublishArtifactTests(unittest.TestCase):
     def test_publish_workflow_is_tag_only_semver_and_multiarch(self):
-        workflow = (ROOT / ".github" / "workflows" / "publish.yml").read_text(encoding="utf-8")
-        self.assertIn("v[0-9]+.[0-9]+.[0-9]+", workflow)
+        workflow = (ROOT / ".github" / "workflows" / "publish-container.yml").read_text(encoding="utf-8")
+        self.assertIn("^v(0|[1-9][0-9]*)", workflow)
         self.assertIn("linux/amd64,linux/arm64", workflow)
         self.assertIn("packages: write", workflow)
         self.assertIn("provenance", workflow)

@@ -25,7 +25,9 @@ FORBIDDEN_PATTERNS = (
 CORE_NETWORK_EXCEPTIONS = {
     "digest.py",
     "examples/discord-webhook.py",
+    "scripts/release_audit.py",
     "scripts/smoke-test.py",
+    "scripts/verify_ghcr.py",
 }
 CORE_FORBIDDEN_RE = re.compile(
     r"graph\.facebook\.com|access[_-]?token|send.*whatsapp|reply.*whatsapp|"
