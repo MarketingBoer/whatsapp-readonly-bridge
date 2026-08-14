@@ -1,240 +1,178 @@
 # WhatsApp Readonly Bridge
 
-A tiny read-only WhatsApp bridge: official Meta Cloud API in, Telegram / Discord / bots / dashboards out.
+Receive inbound WhatsApp messages through Meta's official Cloud API and route them into tools you control, without WhatsApp Web or session scraping.
 
-Receive every incoming WhatsApp message on your server. Forward it anywhere. Single-file Python, zero dependencies, free forever.
+Inbound webhook events are validated, normalized, and appended to local JSONL. Optional Telegram, Discord, reader, stats, and local API examples consume that file outside the core bridge.
 
-```
-Incoming WhatsApp message → your server → Telegram, Discord, AI bot, CRM, dashboard — anything.
-```
+[![Release](https://img.shields.io/github/v/release/MarketingBoer/whatsapp-readonly-bridge)](https://github.com/MarketingBoer/whatsapp-readonly-bridge/releases)
+[![CI](https://github.com/MarketingBoer/whatsapp-readonly-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/MarketingBoer/whatsapp-readonly-bridge/actions/workflows/ci.yml)
+[![GHCR](https://img.shields.io/badge/container-ghcr.io-blue)](https://github.com/MarketingBoer/whatsapp-readonly-bridge/pkgs/container/whatsapp-readonly-bridge)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-No auto-replies. No WhatsApp Web scraping. No Baileys. Read-only by design.
-
-## Who is this for?
-
-- **Developers building AI agents** who need WhatsApp as an input layer — pipe messages into your bot without touching WhatsApp
-- **Agencies and freelancers** who want a shared WhatsApp inbox without paying €50/month for a SaaS tool
-- **Small businesses** where customers message on WhatsApp but nobody tracks follow-ups
-- **Self-hosters** who want WhatsApp data on their own server, in a simple JSONL file they control
-
-A developer sets it up once. Everyone benefits from there.
-
-## What it looks like
-
-Set up the built-in Telegram digest and your team gets this every hour:
-
-```
-📱 WhatsApp Digest — 6 messages
-
-👤 Jan de Vries (31612345678)
-  ☐ 09:14 💬 Hoi, ik wil graag een afspraak maken voor volgende week
-  ☐ 09:15 📷 [image]
-
-👤 Lisa Bakker (31687654321)
-  ☐ 11:32 💬 Kunnen jullie morgen langskomen? Het gaat om de achttertuin
-
-👤 Pieter Jansen (31698765432)
-  ☐ 14:05 💬 Bedankt voor de offerte, we gaan ermee akkoord
-  ☐ 14:06 📄 [document: offerte-getekend.pdf]
-
-👤 31676543210
-  ☐ 16:48 💬 Is er nog plek deze week?
-
-Reply to this message to discuss actions.
+```mermaid
+flowchart LR
+  A[WhatsApp] --> B[Meta Cloud API]
+  B --> C[WhatsApp Readonly Bridge]
+  C --> D[JSONL / your tools]
 ```
 
-Or skip Telegram entirely and feed the JSONL file into your own bot, dashboard, or webhook.
+## Quick Start
 
-## Why not Baileys?
-
-Every WhatsApp bridge on GitHub uses [Baileys](https://github.com/WhiskeySockets/Baileys) — a reverse-engineered protocol. It works until WhatsApp detects it and **bans your number**.
-
-This bridge uses the **official Meta Cloud API**. Same infrastructure that WhatsApp Business Platform runs on.
-
-| | This bridge | Baileys |
-|---|---|---|
-| **Ban risk** | Zero — official Meta API | High — accounts get banned |
-| **Cost** | Free (receiving is always free) | Free |
-| **Setup** | 5 minutes | Hours of session management |
-| **Your phone** | Works alongside WhatsApp Business app | Conflicts with phone sessions |
-| **Compliance** | GDPR-friendly, official | Gray area |
-
-## How it stays free
-
-Receiving WhatsApp messages via the Cloud API is free. Always. You only pay when you *send* messages. Since this bridge is read-only, the entire stack costs nothing:
-
-- **Meta Cloud API** — free for receiving
-- **Telegram Bot API** — free, unlimited
-- **This bridge** — MIT licensed, zero dependencies
-- **Hosting** — runs on a €5 VPS, or your existing server
-
-## How it works
-
-```
-┌──────────────────────────────────────────────────┐
-│  Someone sends you a WhatsApp message            │
-└────────────────────────┬─────────────────────────┘
-                         ▼
-┌──────────────────────────────────────────────────┐
-│  Meta Cloud API (official, free)                 │
-│  Fires a webhook to your server                  │
-└────────────────────────┬─────────────────────────┘
-                         ▼
-┌──────────────────────────────────────────────────┐
-│  bridge.py (single file Python, zero deps)       │
-│  Extracts message, appends to JSONL file         │
-│  READ-ONLY: cannot send messages back            │
-└──────┬──────────────────┬────────────────────────┘
-       ▼                  ▼
-┌─────────────────┐  ┌────────────────────────────┐
-│  messages.jsonl │  │  Forward anywhere:         │
-│  Your data,     │  │  Telegram, Discord, Slack, │
-│  your server    │  │  AI bot, CRM, dashboard,   │
-│                 │  │  n8n, Make.com, webhook    │
-└─────────────────┘  └────────────────────────────┘
-```
-
-## Quick start
-
-### 1. Get a public URL
-
-```bash
-# Cloudflare Tunnel (recommended, free)
-cloudflared tunnel --url http://localhost:3100
-
-# Or ngrok
-ngrok http 3100
-```
-
-### 2. Connect to Meta Cloud API
-
-1. Create a free account at [ChakraHQ](https://app.chakrahq.com) (or use Meta Developer Console directly)
-2. Connect your WhatsApp Business number
-3. Set the webhook URL to your public URL + `/webhook`
-4. Set your verify token
-
-### 3. Start the bridge
-
-**Direct:**
 ```bash
 git clone https://github.com/MarketingBoer/whatsapp-readonly-bridge.git
 cd whatsapp-readonly-bridge
-cp .env.example .env   # edit with your verify token
+cp .env.example .env
+chmod 0600 .env
+$EDITOR .env
+docker compose up -d
+curl http://127.0.0.1:3100/health
+```
+
+Set both required values before startup:
+
+- `WA_VERIFY_TOKEN`: a random value you choose and enter in Meta's webhook verification form.
+- `WA_APP_SECRET`: the Meta app secret used to validate `X-Hub-Signature-256`.
+
+Neither value is a WhatsApp access token.
+
+Pull the published image directly:
+
+```bash
+docker pull ghcr.io/marketingboer/whatsapp-readonly-bridge:latest
+```
+
+For local image builds:
+
+```bash
+WA_VERIFY_TOKEN=dummy WA_APP_SECRET=dummy docker compose -f docker-compose.yml -f docker-compose.build.yml up --build
+```
+
+## Meta prerequisites
+
+You need a Meta app with WhatsApp Business Platform Cloud API access, a public HTTPS callback URL, the app secret, and a webhook subscription for the WhatsApp Business Account `messages` field.
+
+Register one accepted callback path, usually `/webhook`; `/webhook/whatsapp-cloud` is retained for backwards-compatible deployments. Meta verifies the endpoint with your chosen `WA_VERIFY_TOKEN`; signed POST requests are then validated with `WA_APP_SECRET`.
+
+Official Meta references:
+
+- [Webhook endpoint validation and signatures](https://developers.facebook.com/documentation/business-messaging/whatsapp/webhooks/create-webhook-endpoint)
+- [Webhook retries, duplicates, payloads, and fields](https://developers.facebook.com/documentation/business-messaging/whatsapp/webhooks/overview)
+- [Pricing](https://developers.facebook.com/documentation/business-messaging/whatsapp/pricing)
+- [Business App Coexistence onboarding](https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/onboarding-business-app-users)
+
+## Configuration
+
+| Variable | Default | Notes |
+|---|---:|---|
+| `WA_VERIFY_TOKEN` | none | Required; placeholders are rejected |
+| `WA_APP_SECRET` | none | Required; placeholders are rejected |
+| `WA_BIND` | `127.0.0.1` | Compose sets `0.0.0.0` inside the container |
+| `WA_PORT` | `3100` | `1..65535` |
+| `WA_INBOX` | `./inbox/messages.jsonl` | Relative to the process working directory |
+| `WA_WEBHOOK_PATH` | `/webhook` | Also accepts `<path>/whatsapp-cloud` |
+| `WA_LOG_LEVEL` | `INFO` | Standard Python levels |
+| `WA_STORE_RAW` | `true` | `false` keeps `raw: null` |
+| `WA_REQUEST_TIMEOUT` | `10` | Seconds, `1..60` |
+| `WA_SHUTDOWN_TIMEOUT` | `15` | Seconds, `1..60` |
+
+Direct Python uses the tested `.env` loader:
+
+```bash
+cp .env.example .env
+chmod 0600 .env
+$EDITOR .env
 python3 bridge.py
 ```
 
-**Docker:**
-```bash
-WA_VERIFY_TOKEN=your-secret-token docker compose up -d
-```
+## Docker
 
-**systemd (production):**
-```bash
-sudo cp whatsapp-bridge.service /etc/systemd/system/
-sudo systemctl edit whatsapp-bridge  # set your WA_VERIFY_TOKEN
-sudo systemctl enable --now whatsapp-bridge
-```
+`docker-compose.yml` uses `ghcr.io/marketingboer/whatsapp-readonly-bridge:latest`, binds to `127.0.0.1:3100` by default, requires both secrets, and stores data in a named `/data` volume.
 
-### 4. Forward to Telegram (optional)
+## systemd
 
-```bash
-# Create a bot via @BotFather, get your chat ID via @userinfobot
-export TELEGRAM_BOT_TOKEN="123456:ABC-DEF..."
-export TELEGRAM_CHAT_ID="your-chat-id"
+`whatsapp-bridge.service` is a hardened example for direct Python installs. Create `/etc/whatsapp-readonly-bridge.env` as root-owned mode `0600` with `WA_VERIFY_TOKEN` and `WA_APP_SECRET`, place the project under `/opt/whatsapp-readonly-bridge`, and run it behind a TLS reverse proxy or tunnel. Meta requires a publicly trusted HTTPS callback URL.
 
-# Test it
-python3 digest.py --dry-run
+## Architecture
 
-# Run every hour via cron
-0 * * * * cd /opt/whatsapp-bridge && python3 digest.py --hours 1
-```
+`bridge.py` owns configuration, HTTP transport, request limits, logging, and lifecycle. `whatsapp_webhook.py` validates signatures and normalizes payloads. `jsonl_store.py` performs single-node JSONL append, startup ID scanning, retry deduplication, and tolerant reads.
 
-### 5. Forward to Discord (optional)
+Stable record schema:
 
-```bash
-# Create a webhook in your Discord channel settings
-export DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/..."
-export WA_INBOX="messages.jsonl"
-
-# Test it
-python3 examples/discord-webhook.py
-
-# Run every hour via cron
-0 * * * * cd /opt/whatsapp-bridge && python3 examples/discord-webhook.py
-```
-
-## What else you can do
-
-**Read messages live:**
-```bash
-python3 reader.py              # tail mode (like watching a live feed)
-python3 reader.py --last 20    # last 20 messages
-python3 reader.py --from 316…  # filter by contact
-```
-
-**Get inbox stats:**
-```bash
-python3 stats.py               # message counts, top contacts, peak hours
-```
-
-**Expose as API:**
-```bash
-python3 examples/api-server.py  # JSON API on port 3101
-```
-
-**Feed into anything:** The inbox is a JSONL file — one JSON object per line. Read it from any language, pipe it into AI agents, CRMs, databases, Slack, n8n, Make.com.
-
-## Sample data
-
-**Each message looks like this** ([full sample](examples/sample-inbox.jsonl)):
 ```json
 {
-  "ts": "2026-05-08T14:23:51+00:00",
-  "from": "31612345678",
+  "ts": "2026-08-14T14:00:00+00:00",
+  "message_id": "wamid.example",
+  "message_timestamp": "2026-08-14T13:59:58+00:00",
+  "from": "31600000000",
+  "name": "Example Contact",
   "type": "text",
-  "text": "Hoi, ik wil graag een afspraak maken",
-  "name": "Jan de Vries"
+  "text": "Hello",
+  "phone_number_id": "123456789",
+  "raw": null
 }
 ```
 
-**Telegram digest example:** [examples/telegram-digest-example.txt](examples/telegram-digest-example.txt)
+## Examples
 
-## Why read-only?
+- `python3 reader.py --json` prints JSONL records for automation, AI agents, dashboards, or CRM import jobs.
+- `python3 stats.py --json` summarizes local inbox activity.
+- `python3 digest.py --dry-run` formats a periodic Telegram summary without network calls.
+- `python3 examples/discord-webhook.py --dry-run` formats a periodic Discord summary without network calls.
+- `python3 examples/api-server.py` exposes a loopback-only unauthenticated local JSON API example.
 
-Not a limitation — a feature.
+Telegram and Discord examples are periodic summaries. They are not real-time delivery guarantees.
 
-1. **No ban risk** — The bridge literally cannot send messages, even if your code has a bug
-2. **No costs** — Sending costs money. Reading is free
-3. **No compliance issues** — Monitoring ≠ communicating. Different GDPR category
-4. **No lock-in** — JSONL is the simplest possible format. Switch tools anytime
+Sample files:
+
+- [examples/sample-inbox.jsonl](examples/sample-inbox.jsonl)
+- [examples/telegram-digest-example.txt](examples/telegram-digest-example.txt)
+
+## Security and privacy
+
+Accepted-path POST requests require `X-Hub-Signature-256` before JSON parsing. The bridge has no WhatsApp Graph send/reply call and no WhatsApp access-token configuration.
+
+JSONL records can contain phone numbers, names, message summaries, timestamps, and optionally raw message objects. `WA_STORE_RAW=false` reduces retained raw data but is not anonymization. Operators remain responsible for retention, access control, backups, Meta policy, privacy, security, and applicable law.
+
+The Telegram and Discord examples do make outbound requests to those services. They are outside the inbound-only bridge boundary.
+
+See [SECURITY.md](SECURITY.md).
+
+## Pricing
+
+Meta's current pricing documentation distinguishes message categories and says user-to-business messages are not charged in the referenced Cloud API pricing model. Hosting, tunnels, logging, backups, and downstream services may still cost money, and Meta pricing can change.
+
+## Coexistence
+
+Meta documents Business App Coexistence as an onboarding path with eligibility requirements and limitations. Treat it as a Meta account/product condition to verify for your number, not as a universal property of this repository.
+
+## Limitations
+
+- No WhatsApp sending or replying.
+- No media binary download.
+- No browser UI, shared inbox, campaign tool, or chatbot framework.
+- Practical single-process retry deduplication, not transactional exactly-once delivery.
+- One bridge process per inbox for v1.
+- The local API example has no authentication.
 
 ## FAQ
 
-**Is this really free?**
-Yes. Receiving WhatsApp messages is free on Meta's Cloud API. You only pay for sending, and this bridge doesn't send.
+**Can this reply on WhatsApp?** No. The core bridge has no send/reply path.
 
-**Will my WhatsApp get banned?**
-No. This is the official Meta Cloud API, not a reverse-engineered hack. Same infrastructure WhatsApp Business Platform uses.
+**Can tools consume the inbox?** Yes. Use JSONL directly or `reader.py --json`.
 
-**Can I still use my phone?**
-Yes. Cloud API works alongside WhatsApp Business app. Messages arrive in both places.
+**Does it remove compliance work?** No. Self-hosting and official webhooks do not remove operator obligations.
 
-**Can I connect my AI bot to this?**
-Yes. Your bot reads the JSONL file or calls the API server. It gets every WhatsApp message without touching WhatsApp itself.
+**Can I use Telegram or Discord?** Yes, via optional examples that send periodic summaries to those services.
 
-**Can I forward to Discord / Slack / my own app?**
-Yes. A [Discord example](examples/discord-webhook.py) is included. The JSONL file is a universal interface — read it from any language and send it wherever you want.
+## Contributing
 
-**Why not Baileys?**
-Baileys reverse-engineers WhatsApp's protocol. When WhatsApp updates, your number gets banned. The official API is free for reading, so there's no reason to risk it.
+See [CONTRIBUTING.md](CONTRIBUTING.md). Keep v1 focused on signed inbound webhooks, JSONL storage, and optional downstream readers.
 
-**How many messages can it handle?**
-Hundreds per minute. For thousands, put nginx in front.
+## Security
+
+Report private issues according to [SECURITY.md](SECURITY.md). Do not put real secrets, phone numbers, names, or message bodies in issues, tests, or launch material.
 
 ## License
 
-MIT — use it, fork it, sell it. A star helps others find it.
-
----
-
-Built by [Mediadeboer](https://mediadeboer.nl) — we use this in production every day to receive WhatsApp messages and route them to AI agents.
+[MIT](LICENSE)
