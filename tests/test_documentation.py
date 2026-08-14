@@ -64,7 +64,7 @@ class SchemaAndLaunchTests(unittest.TestCase):
         ]
         for rel in files:
             text = (ROOT / rel).read_text(encoding="utf-8")
-            self.assertIn("Status: Draft - do not post automatically", text)
+            self.assertIn("Status: Draft — do not post automatically", text)
         self.assertIn("AI-generated copy", (ROOT / "launch/reddit-opensource.md").read_text(encoding="utf-8"))
         self.assertIn("Showcase Thread", (ROOT / "launch/reddit-python.md").read_text(encoding="utf-8"))
         self.assertIn("published: false", (ROOT / "launch/devto.md").read_text(encoding="utf-8"))
