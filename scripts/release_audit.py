@@ -7,6 +7,8 @@ import json
 import re
 import subprocess
 import sys
+import tarfile
+import tempfile
 from pathlib import Path
 
 
@@ -98,7 +100,11 @@ def check_image_inspection(config: dict, history: list[dict], files: list[str]) 
                   "org.opencontainers.image.description"):
         if label not in labels:
             findings.append(f"missing OCI label: {label}")
-    forbidden_files = [f for f in files if re.search(r"(^|/)(\.git|\.env|tests|docs|mcp_server\.py|__pycache__)", f)]
+    forbidden_files = [
+        f for f in files
+        if f.startswith("/app/")
+        and re.search(r"(^|/)(\.git|\.env|tests|docs|mcp_server\.py|__pycache__)", f)
+    ]
     if forbidden_files:
         findings.append("image filesystem contains forbidden paths")
     return findings
@@ -122,12 +128,57 @@ def _tracked_files(root: Path) -> list[str]:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source-only", action="store_true")
+    parser.add_argument("--image")
     parser.add_argument("--root", default=".")
     args = parser.parse_args(argv)
-    findings = audit_source(Path(args.root).resolve())
+    findings = []
+    if args.image:
+        findings.extend(audit_image(args.image))
+    else:
+        findings.extend(audit_source(Path(args.root).resolve()))
     for finding in findings:
         print(f"ERROR: {finding}")
+    if not findings:
+        print("PASS: release audit")
     return 1 if findings else 0
+
+
+def audit_image(image: str) -> list[str]:
+    findings: list[str] = []
+    try:
+        inspect = json.loads(_run(["docker", "image", "inspect", image]))[0]
+        history = json.loads(_run(["docker", "history", "--no-trunc", "--format", "{{json .}}", image], json_lines=True))
+    except Exception as exc:
+        return [f"docker inspect failed: {type(exc).__name__}"]
+
+    files: list[str] = []
+    container_id = None
+    with tempfile.TemporaryDirectory() as tmp:
+        archive = Path(tmp) / "fs.tar"
+        try:
+            container_id = _run(["docker", "create", image]).strip()
+            with archive.open("wb") as handle:
+                subprocess.run(["docker", "export", container_id], check=True,
+                               stdout=handle, stderr=subprocess.PIPE)
+            with tarfile.open(archive) as tar:
+                files = ["/" + member.name for member in tar.getmembers()]
+        except Exception as exc:
+            findings.append(f"docker filesystem inspection failed: {type(exc).__name__}")
+        finally:
+            if container_id:
+                subprocess.run(["docker", "rm", "-f", container_id],
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    findings.extend(check_image_inspection(inspect, history, files))
+    return findings
+
+
+def _run(cmd: list[str], json_lines: bool = False) -> str:
+    result = subprocess.run(cmd, check=True, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, text=True)
+    if not json_lines:
+        return result.stdout
+    items = [json.loads(line) for line in result.stdout.splitlines() if line]
+    return json.dumps(items)
 
 
 if __name__ == "__main__":
