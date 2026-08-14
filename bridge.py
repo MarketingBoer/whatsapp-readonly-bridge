@@ -6,12 +6,27 @@ boundary in the next implementation task.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import json
+import logging
 import os
 from pathlib import Path
+import signal
+import socket
 import sys
+import threading
+import time
 from types import MappingProxyType
-from typing import Mapping
-from urllib.parse import urlsplit
+from typing import Callable, Mapping
+from urllib.parse import parse_qs, urlsplit
+
+from jsonl_store import JsonlStore, StorageError
+from whatsapp_webhook import PayloadError, SignatureError, parse_webhook, validate_signature
+
+
+LOGGER = logging.getLogger("bridge")
+MAX_BODY_BYTES = 3_145_728
 
 
 class ConfigError(ValueError):
@@ -87,13 +102,245 @@ def load_config(env: Mapping[str, str], base_dir: Path) -> BridgeConfig:
 
 def main() -> int:
     try:
-        load_config(os.environ, Path(__file__).resolve().parent)
-    except ConfigError as exc:
-        print(f"ConfigError: {exc}", file=sys.stderr)
+        config = load_config(os.environ, Path(__file__).resolve().parent)
+        logging.basicConfig(level=getattr(logging, config.log_level))
+        store = JsonlStore(config.inbox)
+        store.initialize()
+        server = create_server(config, store)
+    except (ConfigError, StorageError, OSError) as exc:
+        print(f"{type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
-    print("bridge server startup is implemented in the HTTP hardening task",
-          file=sys.stderr)
-    return 1
+    return run_server(server, config.shutdown_timeout)
+
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def make_handler(config: BridgeConfig, store: JsonlStore,
+                 clock: Callable[[], datetime]) -> type[BaseHTTPRequestHandler]:
+    class WebhookHandler(BaseHTTPRequestHandler):
+        server_version = "WhatsAppReadonlyBridge/1.0"
+
+        def setup(self):
+            super().setup()
+            self.connection.settimeout(config.request_timeout)
+
+        def handle(self):
+            self.server._bridge_increment()
+            try:
+                super().handle()
+            finally:
+                self.server._bridge_decrement()
+
+        def log_message(self, fmt, *args):
+            return
+
+        def do_GET(self):
+            start = time.monotonic()
+            parsed = urlsplit(self.path)
+            path = parsed.path
+            status = 500
+            records = 0
+            duplicates = 0
+            try:
+                if path == "/health":
+                    status = 503 if self.server._bridge_stopping else 200
+                    self._json(status, {"status": "ok" if status == 200 else "stopping"})
+                    return
+                if path in config.accepted_webhook_paths:
+                    params = parse_qs(parsed.query, keep_blank_values=True)
+                    mode = params.get("hub.mode", [""])[0]
+                    token = params.get("hub.verify_token", [""])[0]
+                    challenge = params.get("hub.challenge", [""])[0]
+                    if mode == "subscribe" and token == config.verify_token:
+                        body = challenge.encode("utf-8")
+                        status = 200
+                        self.send_response(status)
+                        self.send_header("Content-Type", "text/plain; charset=utf-8")
+                        self.send_header("Cache-Control", "no-store")
+                        self.send_header("Content-Length", str(len(body)))
+                        self.end_headers()
+                        self.wfile.write(body)
+                        return
+                    status = 403
+                    self._json(status, {"error": "forbidden"})
+                    return
+                status = 404
+                self._json(status, {"error": "not_found"})
+            finally:
+                self._log_request("GET", path, status, start, records, duplicates)
+
+        def do_POST(self):
+            start = time.monotonic()
+            parsed = urlsplit(self.path)
+            path = parsed.path
+            status = 500
+            records = 0
+            duplicates = 0
+            try:
+                if path not in config.accepted_webhook_paths:
+                    status = 404
+                    self._json(status, {"error": "not_found"})
+                    return
+
+                length, status = self._validated_content_length()
+                if status is not None:
+                    self._json(status, {"error": "bad_request"})
+                    return
+                if length > MAX_BODY_BYTES:
+                    status = 413
+                    self._json(status, {"error": "too_large"})
+                    return
+
+                content_type = self.headers.get("Content-Type", "")
+                if content_type.split(";", 1)[0].strip().lower() != "application/json":
+                    status = 415
+                    self._json(status, {"error": "unsupported_media_type"})
+                    return
+
+                try:
+                    body = self.rfile.read(length)
+                except socket.timeout:
+                    status = 408
+                    self._json(status, {"error": "timeout"})
+                    return
+                if len(body) != length:
+                    status = 400
+                    self._json(status, {"error": "short_body"})
+                    return
+
+                try:
+                    validate_signature(body, self.headers.get("X-Hub-Signature-256"),
+                                       config.app_secret)
+                except SignatureError:
+                    status = 401
+                    self._json(status, {"error": "unauthorized"})
+                    return
+
+                try:
+                    payload = json.loads(body.decode("utf-8"))
+                    parsed_records = parse_webhook(payload, clock(),
+                                                   store_raw=config.store_raw)
+                except (UnicodeDecodeError, json.JSONDecodeError, PayloadError):
+                    status = 400
+                    self._json(status, {"error": "invalid_payload"})
+                    return
+
+                try:
+                    append_result = store.append(parsed_records)
+                except StorageError:
+                    status = 500
+                    self._json(status, {"error": "storage_error"})
+                    return
+
+                records = append_result.written
+                duplicates = append_result.duplicates
+                status = 200
+                self._json(status, {"records": records, "duplicates": duplicates})
+            finally:
+                self._log_request("POST", path, status, start, records, duplicates)
+
+        def _validated_content_length(self) -> tuple[int, int | None]:
+            if self.headers.get("Transfer-Encoding") is not None:
+                return 0, 400
+            values = self.headers.get_all("Content-Length")
+            if values is None:
+                return 0, 411
+            if len(values) != 1:
+                return 0, 400
+            try:
+                length = int(values[0])
+            except ValueError:
+                return 0, 400
+            if str(length) != values[0].strip() or length < 0:
+                return 0, 400
+            return length, None
+
+        def _json(self, status: int, payload: dict[str, object]) -> None:
+            body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _log_request(self, method: str, path: str, status: int, start: float,
+                         records: int, duplicates: int) -> None:
+            duration_ms = int((time.monotonic() - start) * 1000)
+            LOGGER.info(
+                "request method=%s path=%s status=%d duration_ms=%d records=%d duplicates=%d",
+                method,
+                path,
+                status,
+                duration_ms,
+                records,
+                duplicates,
+            )
+
+    return WebhookHandler
+
+
+def create_server(config: BridgeConfig, store: JsonlStore,
+                  clock: Callable[[], datetime] = utc_now) -> ThreadingHTTPServer:
+    handler = make_handler(config, store, clock)
+    server = ThreadingHTTPServer((config.bind, config.port), handler)
+    server.daemon_threads = True
+    server._bridge_stopping = False
+    server._bridge_inflight = 0
+    server._bridge_condition = threading.Condition()
+
+    def increment() -> None:
+        with server._bridge_condition:
+            server._bridge_inflight += 1
+
+    def decrement() -> None:
+        with server._bridge_condition:
+            server._bridge_inflight -= 1
+            server._bridge_condition.notify_all()
+
+    server._bridge_increment = increment
+    server._bridge_decrement = decrement
+    return server
+
+
+def run_server(server: ThreadingHTTPServer, shutdown_timeout: float) -> int:
+    previous_handlers = {}
+    stop_event = threading.Event()
+
+    def request_stop(signum, _frame):
+        server._bridge_stopping = True
+        stop_event.set()
+        threading.Thread(target=server.shutdown, daemon=True).start()
+
+    for signum in (signal.SIGINT, signal.SIGTERM):
+        try:
+            previous_handlers[signum] = signal.getsignal(signum)
+            signal.signal(signum, request_stop)
+        except ValueError:
+            pass
+
+    try:
+        try:
+            server.serve_forever()
+        finally:
+            if not stop_event.is_set():
+                server._bridge_stopping = True
+        deadline = time.monotonic() + shutdown_timeout
+        with server._bridge_condition:
+            while server._bridge_inflight and time.monotonic() < deadline:
+                server._bridge_condition.wait(timeout=0.05)
+            drained = server._bridge_inflight == 0
+        server.server_close()
+        if not drained:
+            LOGGER.error("shutdown deadline exceeded inflight=%d",
+                         server._bridge_inflight)
+            return 1
+        return 0
+    finally:
+        for signum, handler in previous_handlers.items():
+            signal.signal(signum, handler)
 
 
 def _load_dotenv(path: Path) -> dict[str, str]:
