@@ -1,6 +1,3 @@
-{"ts": "2026-05-08T09:14:23.761+00:00", "from": "31612345678", "type": "text", "text": "Hoi, ik wil graag een afspraak maken voor volgende week", "name": "Jan de Vries", "raw": {}}
-{"ts": "2026-05-08T09:15:01.442+00:00", "from": "31612345678", "type": "image", "text": "[image]", "name": "Jan de Vries", "raw": {}}
-{"ts": "2026-05-08T11:32:17.109+00:00", "from": "31687654321", "type": "text", "text": "Kunnen jullie morgen langskomen? Het gaat om de achttertuin", "name": "Lisa Bakker", "raw": {}}
-{"ts": "2026-05-08T14:05:44.833+00:00", "from": "31698765432", "type": "text", "text": "Bedankt voor de offerte, we gaan ermee akkoord", "name": "Pieter Jansen", "raw": {}}
-{"ts": "2026-05-08T14:06:12.501+00:00", "from": "31698765432", "type": "document", "text": "[document: offerte-getekend.pdf]", "name": "Pieter Jansen", "raw": {}}
-{"ts": "2026-05-08T16:48:59.227+00:00", "from": "31676543210", "type": "text", "text": "Is er nog plek deze week?", "name": null, "raw": {}}
+{"ts":"2026-08-14T08:00:00+00:00","message_id":"wamid.example-1","message_timestamp":"2026-08-14T07:59:58+00:00","from":"31600000000","name":"Example Contact","type":"text","text":"Can you call me today?","phone_number_id":"123456789","raw":null}
+{"ts":"2026-08-14T08:05:00+00:00","message_id":"wamid.example-2","message_timestamp":"2026-08-14T08:04:59+00:00","from":"31600000000","name":"Example Contact","type":"image","text":"[image]","phone_number_id":"123456789","raw":null}
+{"ts":"2026-08-14T09:15:00+00:00","message_id":"wamid.example-3","message_timestamp":"2026-08-14T09:14:55+00:00","from":"31600000001","name":null,"type":"document","text":"[document: example.pdf]","phone_number_id":"123456789","raw":null}

@@ -1,160 +1,95 @@
 from __future__ import annotations
-"""
-Inbox statistics — show message counts, top contacts, activity by hour.
+"""Compute local inbox statistics."""
 
-Usage:
-    python3 stats.py                # full summary
-    python3 stats.py --json         # machine-readable output
-    python3 stats.py --days 7       # last 7 days only
-"""
+import argparse
+from collections import Counter
+from datetime import datetime, timezone, timedelta
 import json
 import os
-import sys
-from collections import Counter, defaultdict
-from datetime import datetime, timezone, timedelta
+from pathlib import Path
 
-INBOX_FILE = os.environ.get("WA_INBOX", "./inbox/messages.jsonl")
+from jsonl_store import read_jsonl
 
 
-def load_messages(since: datetime | None = None) -> list[dict]:
+DEFAULT_INBOX = "./inbox/messages.jsonl"
+
+
+def _parse_ts(value: object) -> datetime | None:
+    if not isinstance(value, str):
+        return None
     try:
-        with open(INBOX_FILE) as f:
-            lines = f.readlines()
-    except FileNotFoundError:
-        print(f"No inbox found at {INBOX_FILE}")
-        return []
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
-    messages = []
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            msg = json.loads(line)
-            if since:
-                ts = datetime.fromisoformat(msg["ts"]).replace(tzinfo=timezone.utc)
-                if ts < since:
-                    continue
-            messages.append(msg)
-        except (json.JSONDecodeError, KeyError, ValueError):
-            continue
-    return messages
+
+def load_messages(since: datetime | None = None,
+                  path: str | Path | None = None) -> list[dict]:
+    records = read_jsonl(Path(path or os.environ.get("WA_INBOX", DEFAULT_INBOX))).records
+    if since is None:
+        return records
+    since = since.astimezone(timezone.utc)
+    return [record for record in records
+            if (ts := _parse_ts(record.get("ts"))) is not None and ts >= since]
 
 
 def compute_stats(messages: list[dict]) -> dict:
     if not messages:
-        return {"total": 0}
-
+        return {"total": 0, "unique_contacts": 0, "message_types": {},
+                "top_contacts": [], "peak_hours": [], "messages_per_day": {}}
     contacts = Counter()
+    names = {}
     types = Counter()
     hours = Counter()
-    daily = Counter()
-    contact_names = {}
-
+    days = Counter()
     for msg in messages:
         phone = msg.get("from", "unknown")
         contacts[phone] += 1
-        types[msg.get("type", "text")] += 1
-
         if msg.get("name"):
-            contact_names[phone] = msg["name"]
-
-        try:
-            ts = datetime.fromisoformat(msg["ts"])
+            names[phone] = msg["name"]
+        types[msg.get("type", "text")] += 1
+        ts = _parse_ts(msg.get("ts"))
+        if ts is not None:
             hours[ts.hour] += 1
-            daily[ts.strftime("%Y-%m-%d")] += 1
-        except (ValueError, KeyError):
-            pass
-
-    first_ts = messages[0].get("ts", "?")[:19]
-    last_ts = messages[-1].get("ts", "?")[:19]
-
-    top_contacts = []
-    for phone, count in contacts.most_common(10):
-        name = contact_names.get(phone)
-        label = f"{name} ({phone})" if name else phone
-        top_contacts.append({"contact": label, "messages": count})
-
-    peak_hours = sorted(hours.items(), key=lambda x: -x[1])[:5]
-
+            days[ts.date().isoformat()] += 1
     return {
         "total": len(messages),
         "unique_contacts": len(contacts),
-        "first_message": first_ts,
-        "last_message": last_ts,
+        "first_message": str(messages[0].get("ts", ""))[:19],
+        "last_message": str(messages[-1].get("ts", ""))[:19],
         "message_types": dict(types.most_common()),
-        "top_contacts": top_contacts,
-        "peak_hours": [{"hour": f"{h:02d}:00", "messages": c} for h, c in peak_hours],
-        "messages_per_day": dict(sorted(daily.items())),
+        "top_contacts": [
+            {"contact": f"{names[p]} ({p})" if p in names else p, "messages": c}
+            for p, c in contacts.most_common(10)
+        ],
+        "peak_hours": [{"hour": f"{h:02d}:00", "messages": c}
+                       for h, c in sorted(hours.items(), key=lambda item: -item[1])[:5]],
+        "messages_per_day": dict(sorted(days.items())),
     }
 
 
-def print_stats(stats: dict):
-    if stats["total"] == 0:
-        print("No messages found.")
-        return
-
-    print(f"{'='*50}")
-    print(f"  WhatsApp Inbox Statistics")
-    print(f"{'='*50}")
-    print(f"  Total messages:    {stats['total']}")
-    print(f"  Unique contacts:   {stats['unique_contacts']}")
-    print(f"  First message:     {stats['first_message']}")
-    print(f"  Last message:      {stats['last_message']}")
-    print()
-
-    print("  Message types:")
-    for msg_type, count in stats["message_types"].items():
-        bar = "█" * min(count, 40)
-        print(f"    {msg_type:<15} {count:>5}  {bar}")
-    print()
-
-    print("  Top contacts:")
-    for item in stats["top_contacts"]:
-        bar = "█" * min(item["messages"], 40)
-        print(f"    {item['contact']:<30} {item['messages']:>5}  {bar}")
-    print()
-
-    print("  Peak hours:")
-    for item in stats["peak_hours"]:
-        bar = "█" * min(item["messages"], 40)
-        print(f"    {item['hour']}  {item['messages']:>5}  {bar}")
-    print()
-
-    if stats["messages_per_day"]:
-        print("  Daily activity:")
-        for day, count in stats["messages_per_day"].items():
-            bar = "█" * min(count, 40)
-            print(f"    {day}  {count:>5}  {bar}")
-
-    print(f"{'='*50}")
-
-
-def main():
-    args = sys.argv[1:]
-    output_json = "--json" in args
-    days = None
-
-    i = 0
-    while i < len(args):
-        if args[i] == "--days" and i + 1 < len(args):
-            days = int(args[i + 1])
-            i += 2
-        else:
-            i += 1
-
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--inbox", default=os.environ.get("WA_INBOX", DEFAULT_INBOX))
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("--days", type=float)
+    args = parser.parse_args(argv)
     since = None
-    if days:
-        since = datetime.now(timezone.utc) - timedelta(days=days)
-
-    messages = load_messages(since)
-    stats = compute_stats(messages)
-
-    if output_json:
-        print(json.dumps(stats, indent=2, ensure_ascii=False))
+    if args.days is not None:
+        since = datetime.now(timezone.utc) - timedelta(days=args.days)
+    stats = compute_stats(load_messages(since, args.inbox))
+    if args.json:
+        print(json.dumps(stats, ensure_ascii=False, indent=2))
+    elif stats["total"] == 0:
+        print("No messages found.")
     else:
-        print_stats(stats)
+        print(f"Total messages: {stats['total']}")
+        print(f"Unique contacts: {stats['unique_contacts']}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

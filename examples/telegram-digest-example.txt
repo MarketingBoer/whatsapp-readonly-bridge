@@ -1,17 +1,10 @@
-📱 WhatsApp Digest — 6 messages
+WhatsApp Digest - 3 messages
 
-👤 Jan de Vries (31612345678)
-  ☐ 09:14 💬 Hoi, ik wil graag een afspraak maken voor volgende week
-  ☐ 09:15 📷 [image]
+Example Contact (31600000000)
+  [ ] 08:00 Can you call me today?
+  [ ] 08:05 [image] [image]
 
-👤 Lisa Bakker (31687654321)
-  ☐ 11:32 💬 Kunnen jullie morgen langskomen? Het gaat om de achttertuin
+31600000001
+  [ ] 09:15 [document] [document: example.pdf]
 
-👤 Pieter Jansen (31698765432)
-  ☐ 14:05 💬 Bedankt voor de offerte, we gaan ermee akkoord
-  ☐ 14:06 📄 [document: offerte-getekend.pdf]
-
-👤 31676543210
-  ☐ 16:48 💬 Is er nog plek deze week?
-
-Reply to this message to discuss actions.
+Reply in Telegram to discuss actions; this bridge never replies on WhatsApp.

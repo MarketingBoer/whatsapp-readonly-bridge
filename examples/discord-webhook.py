@@ -1,56 +1,98 @@
 #!/usr/bin/env python3
-"""Forward WhatsApp messages to a Discord channel via webhook."""
+"""Send a periodic WhatsApp JSONL digest to Discord."""
 
-import json, os, sys, urllib.request
-from datetime import datetime, timedelta, timezone
+from __future__ import annotations
 
-WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "")
-INBOX = os.environ.get("WA_INBOX", "messages.jsonl")
-HOURS = int(os.environ.get("DIGEST_HOURS", "1"))
+from datetime import datetime, timezone, timedelta
+import argparse
+import json
+import os
+from pathlib import Path
+import sys
+import urllib.request
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from jsonl_store import read_jsonl
+
+DEFAULT_INBOX = "./inbox/messages.jsonl"
+DISCORD_LIMIT = 2000
+
+
+def _parse_ts(value):
+    try:
+        parsed = datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
 
 def load_recent(path, hours):
     cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
-    messages = []
-    try:
-        with open(path) as f:
-            for line in f:
-                msg = json.loads(line)
-                ts = datetime.fromisoformat(msg["ts"])
-                if ts >= cutoff:
-                    messages.append(msg)
-    except FileNotFoundError:
-        return []
-    return messages
+    return [msg for msg in read_jsonl(Path(path)).records
+            if (ts := _parse_ts(msg.get("ts"))) is not None
+            and ts.astimezone(timezone.utc) >= cutoff]
+
 
 def format_discord(messages):
     if not messages:
-        return None
-    lines = [f"**WhatsApp Digest — {len(messages)} messages**\n"]
-    by_contact = {}
-    for m in messages:
-        key = m.get("name", m["from"])
-        by_contact.setdefault(key, []).append(m)
-    for contact, msgs in by_contact.items():
-        lines.append(f"**{contact}**")
-        for m in msgs:
-            ts = datetime.fromisoformat(m["ts"]).strftime("%H:%M")
-            text = m.get("text", f'[{m.get("type", "media")}]')
-            lines.append(f"  {ts} — {text}")
-        lines.append("")
+        return "No new WhatsApp messages."
+    lines = [f"WhatsApp Digest - {len(messages)} messages", ""]
+    for msg in messages:
+        ts = _parse_ts(msg.get("ts"))
+        when = ts.strftime("%H:%M") if ts else "??:??"
+        who = msg.get("name") or msg.get("from", "unknown")
+        lines.append(f"{when} - {who}: {msg.get('text', '')}")
+    lines.append("")
+    lines.append("Periodic summary only; this bridge never replies on WhatsApp.")
     return "\n".join(lines)
 
+
+def split_chunks(text, limit=DISCORD_LIMIT):
+    return [text[i:i + limit] for i in range(0, len(text), limit)] or [""]
+
+
 def send(webhook_url, content):
-    data = json.dumps({"content": content}).encode()
-    req = urllib.request.Request(webhook_url, data, {"Content-Type": "application/json"})
-    urllib.request.urlopen(req)
+    for chunk in split_chunks(content):
+        data = json.dumps({"content": chunk}).encode("utf-8")
+        req = urllib.request.Request(webhook_url, data,
+                                     {"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=10) as response:
+                if response.status < 200 or response.status >= 300:
+                    return False
+                body = response.read()
+        except Exception:
+            return False
+        if body:
+            try:
+                payload = json.loads(body)
+            except json.JSONDecodeError:
+                payload = {}
+            if payload.get("code") or payload.get("message") == "error":
+                return False
+    return True
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--inbox", default=os.environ.get("WA_INBOX", DEFAULT_INBOX))
+    parser.add_argument("--hours", type=float, default=float(os.environ.get("DIGEST_HOURS", "1")))
+    parser.add_argument("--dry-run", action="store_true")
+    args = parser.parse_args(argv)
+    body = format_discord(load_recent(args.inbox, args.hours))
+    if args.dry_run:
+        print(body)
+        return 0
+    webhook_url = os.environ.get("DISCORD_WEBHOOK_URL", "")
+    if not webhook_url:
+        print("Set DISCORD_WEBHOOK_URL", file=sys.stderr)
+        return 1
+    if not send(webhook_url, body):
+        print("Discord send failed", file=sys.stderr)
+        return 1
+    print("Discord digest sent")
+    return 0
+
 
 if __name__ == "__main__":
-    if not WEBHOOK_URL:
-        print("Set DISCORD_WEBHOOK_URL environment variable")
-        sys.exit(1)
-    body = format_discord(load_recent(INBOX, HOURS))
-    if body:
-        send(WEBHOOK_URL, body)
-        print(f"Sent {len(body)} chars to Discord")
-    else:
-        print("No new messages")
+    raise SystemExit(main())
