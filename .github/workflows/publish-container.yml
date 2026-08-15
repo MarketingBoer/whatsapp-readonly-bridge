@@ -78,10 +78,35 @@ jobs:
               | docker login ghcr.io -u "${GITHUB_REPOSITORY_OWNER}" --password-stdin; then
             echo "WARN: login for repository owner token principal not accepted; continuing with actor credentials." >&2
           fi
-          for image_ref in \
-            "ghcr.io/marketingboer/whatsapp-readonly-bridge:${GITHUB_REF_NAME}" \
-            "${{ steps.build.outputs.imageid }}"; do
+
+          semver_tag="${GITHUB_REF_NAME#v}"
+          major="${semver_tag%%.*}"
+          minor="${semver_tag#*.}"
+          minor="${minor%%.*}"
+
+          image_refs=(
+            "ghcr.io/${{ github.repository_owner }}/whatsapp-readonly-bridge:${semver_tag}"
+            "ghcr.io/${{ github.repository_owner }}/whatsapp-readonly-bridge:${major}.${minor}"
+            "ghcr.io/${{ github.repository_owner }}/whatsapp-readonly-bridge:${major}"
+            "ghcr.io/${{ github.repository_owner }}/whatsapp-readonly-bridge:latest"
+            "ghcr.io/${{ github.repository_owner }}/whatsapp-readonly-bridge:${GITHUB_REF_NAME}"
+          )
+
+          if [ -n "${{ steps.build.outputs.imageid }}" ]; then
+            image_refs+=("${{ steps.build.outputs.imageid }}")
+            if [[ "${{ steps.build.outputs.imageid }}" == sha256:* ]]; then
+              image_refs+=("ghcr.io/${{ github.repository_owner }}/whatsapp-readonly-bridge@${{ steps.build.outputs.imageid }}")
+            fi
+          fi
+
+          if [ -n "${{ steps.build.outputs.digest }}" ]; then
+            image_refs+=("${{ steps.build.outputs.digest }}")
+            image_refs+=("ghcr.io/${{ github.repository_owner }}/whatsapp-readonly-bridge@${{ steps.build.outputs.digest }}")
+          fi
+
+          for image_ref in "${image_refs[@]}"; do
             if docker buildx imagetools inspect "$image_ref"; then
+              echo "Verified published image: $image_ref"
               exit 0
             fi
             echo "WARN: image inspect failed for $image_ref" >&2
