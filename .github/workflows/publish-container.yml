@@ -78,30 +78,30 @@ jobs:
               | docker login ghcr.io -u "${GITHUB_REPOSITORY_OWNER}" --password-stdin; then
             echo "WARN: login for repository owner token principal not accepted; continuing with actor credentials." >&2
           fi
-
+          
+          repo_owner="$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
+          base_image="ghcr.io/${repo_owner}/whatsapp-readonly-bridge"
           semver_tag="${GITHUB_REF_NAME#v}"
           major="${semver_tag%%.*}"
           minor="${semver_tag#*.}"
           minor="${minor%%.*}"
 
           image_refs=(
-            "ghcr.io/${{ github.repository_owner }}/whatsapp-readonly-bridge:${semver_tag}"
-            "ghcr.io/${{ github.repository_owner }}/whatsapp-readonly-bridge:${major}.${minor}"
-            "ghcr.io/${{ github.repository_owner }}/whatsapp-readonly-bridge:${major}"
-            "ghcr.io/${{ github.repository_owner }}/whatsapp-readonly-bridge:latest"
-            "ghcr.io/${{ github.repository_owner }}/whatsapp-readonly-bridge:${GITHUB_REF_NAME}"
+            "${base_image}:${semver_tag}"
+            "${base_image}:${major}.${minor}"
+            "${base_image}:${major}"
+            "${base_image}:latest"
+            "${base_image}:${GITHUB_REF_NAME}"
           )
 
           if [ -n "${{ steps.build.outputs.imageid }}" ]; then
-            image_refs+=("${{ steps.build.outputs.imageid }}")
-            if [[ "${{ steps.build.outputs.imageid }}" == sha256:* ]]; then
-              image_refs+=("ghcr.io/${{ github.repository_owner }}/whatsapp-readonly-bridge@${{ steps.build.outputs.imageid }}")
+            if [[ "${{ steps.build.outputs.imageid }}" == *"@"* ]]; then
+              image_refs+=("${{ steps.build.outputs.imageid }}")
             fi
           fi
 
           if [ -n "${{ steps.build.outputs.digest }}" ]; then
-            image_refs+=("${{ steps.build.outputs.digest }}")
-            image_refs+=("ghcr.io/${{ github.repository_owner }}/whatsapp-readonly-bridge@${{ steps.build.outputs.digest }}")
+            image_refs+=("${base_image}@${{ steps.build.outputs.digest }}")
           fi
 
           for image_ref in "${image_refs[@]}"; do
